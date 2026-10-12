@@ -57,27 +57,31 @@ async def check_and_send_reminders():
 
 @dp.message(CommandStart())
 async def start_handler(message: types.Message):
-    welcome_text = (
-        f"👋 Привет, {message.from_user.first_name}!\n\n"
-        f"Перед тобой игра с коротколапой **кошечкой Луной**! 🐾\n"
-        f"Нажми кнопку ниже, чтобы открыть приложение, погладить Луну, покормить её или поиграть удочкой.\n\n"
-        f"{GUIDE_TEXT}"
-    )
     photo_path = "static/luna.jpg"
+    welcome_caption = (
+        f"👋 Привет, {message.from_user.first_name}!\n\n"
+        f"Познакомься, это твоя подопечная — **кошечка манчкин по имени Луна**! 🐾\n\n"
+        f"Нажми кнопку ниже, чтобы открыть мини-игру, погладить Луну, покормить её или поиграть удочкой."
+    )
+
+    # 1. Отправляем фото с кнопкой запуска игры
     if os.path.exists(photo_path):
         photo = FSInputFile(photo_path)
         await message.answer_photo(
             photo=photo,
-            caption=welcome_text,
+            caption=welcome_caption,
             reply_markup=get_launch_keyboard(),
             parse_mode="Markdown"
         )
     else:
         await message.answer(
-            text=welcome_text,
+            text=welcome_caption,
             reply_markup=get_launch_keyboard(),
             parse_mode="Markdown"
         )
+
+    # 2. Отдельным сообщением присылаем памятку по уходу
+    await message.answer(GUIDE_TEXT, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "show_guide")
 async def show_guide_cb(callback: types.CallbackQuery):
