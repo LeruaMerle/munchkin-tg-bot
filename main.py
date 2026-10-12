@@ -80,9 +80,11 @@ async def check_hungry_pets_job():
                 await mark_notified(user_id)
             except Exception as e:
                 print(f"Ошибка отправки: {e}")
+CACHED_PHOTO_ID = None
 
 @dp.message(CommandStart())
 async def start_handler(message: types.Message):
+    global CACHED_PHOTO_ID
     photo_path = "static/luna.jpg"
     welcome_caption = (
         f"👋 Привет, {message.from_user.first_name}!\n\n"
@@ -90,14 +92,21 @@ async def start_handler(message: types.Message):
         f"Нажми кнопку ниже, чтобы открыть мини-игру, погладить её, покормить, поиграть или уложить спать с живой анимацией."
     )
 
-    if os.path.exists(photo_path):
-        photo = FSInputFile(photo_path)
+    if CACHED_PHOTO_ID:
         await message.answer_photo(
-            photo=photo,
+            photo=CACHED_PHOTO_ID,
             caption=welcome_caption,
             reply_markup=get_launch_keyboard(),
             parse_mode="Markdown"
         )
+    elif os.path.exists(photo_path):
+        sent = await message.answer_photo(
+            photo=FSInputFile(photo_path),
+            caption=welcome_caption,
+            reply_markup=get_launch_keyboard(),
+            parse_mode="Markdown"
+        )
+        CACHED_PHOTO_ID = sent.photo[-1].file_id
     else:
         await message.answer(
             text=welcome_caption,
@@ -117,7 +126,7 @@ async def show_guide_cb(callback: types.CallbackQuery):
 async def lifespan(app: FastAPI):
     await init_db()
     # Проверка завершения минутного действия каждые 5 секунд
-    scheduler.add_job(check_finished_actions_job, "interval", seconds=5)
+    scheduler.add_job(check_finished_actions_job, "interval", seconds=10)
     # Проверка голода каждые 15 минут
     scheduler.add_job(check_hungry_pets_job, "interval", minutes=15)
     scheduler.start()
