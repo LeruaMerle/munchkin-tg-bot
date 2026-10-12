@@ -8,23 +8,22 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo, FSInputFile
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from database import init_db, get_pet, update_pet, get_hungry_pets, mark_notified
+from database import (
+    init_db, get_pet, update_pet, start_action, 
+    complete_action, get_finished_actions, get_hungry_pets, mark_notified
+)
 from guide import GUIDE_TEXT
 
-# Переменные окружения (на хостинге задаются в настройках, локально берутся значения по умолчанию)
-BOT_TOKEN = os.getenv("BOT_TOKEN", "ВАШ_ТОКЕН_БОТА")
-# Публичный адрес сайта на хостинге (например, https://munchkin-luna.onrender.com)
-APP_URL = os.getenv("APP_URL", "https://your-app-name.onrender.com")
+BOT_TOKEN = os.getenv("8966880292:AAGb4iNtfePMMBq0IDi43zErcoQDRvCegQE")
+APP_URL = os.getenv("https://munchkin-tg-bot.onrender.com")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 scheduler = AsyncIOScheduler()
-
-# --- Логика Telegram-бота ---
 
 def get_launch_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -39,15 +38,42 @@ def get_launch_keyboard() -> InlineKeyboardMarkup:
         ]
     ])
 
-async def check_and_send_reminders():
+# Проверка окончания минутного таймера и отправка пуша
+async def check_finished_actions_job():
+    finished = await get_finished_actions()
+    for user_id, action in finished:
+        msg = ""
+        if action == "feed":
+            await complete_action(user_id, hunger_delta=30, energy_delta=5, happiness_delta=10)
+            msg = "🍲 **Луна покушала!**\nОна сыта, умывает мордочку и довольно мурлычет."
+        elif action == "play":
+            await complete_action(user_id, hunger_delta=-10, energy_delta=-15, happiness_delta=30)
+            msg = "🐭 **Луна закончила играть!**\nОна вдоволь набегалась за мышонком и очень счастлива!"
+        elif action == "sleep":
+            await complete_action(user_id, hunger_delta=-5, energy_delta=40, happiness_delta=10)
+            msg = "💤 **Луна выспалась!**\nОна сладко потянулась на коротких лапках и полна энергии!"
+
+        if msg:
+            try:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=f"{msg}\nЗагляните в игру, чтобы навестить малышку 🐾",
+                    reply_markup=get_launch_keyboard(),
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                print(f"Ошибка пуша завершения действия: {e}")
+
+# Проверка голода (раз в 15 минут)
+async def check_hungry_pets_job():
     pets = await get_hungry_pets()
     for user_id, hunger, happiness, notified in pets:
         if (hunger < 30 or happiness < 25) and notified == 0:
             try:
-                reason = "голодна! Пора подкрепиться 🥣" if hunger < 30 else "соскучилась по играм 🧶"
+                reason = "проголодалась! Пора покушать 🥣" if hunger < 30 else "соскучилась по вам 🧶"
                 await bot.send_message(
                     chat_id=user_id,
-                    text=f"🔔 **Напоминание!**\n\nЛуна {reason}\nОткрой игру и позаботься о малышке!",
+                    text=f"🔔 **Напоминание о Луне!**\n\nМалышка {reason}!",
                     reply_markup=get_launch_keyboard(),
                     parse_mode="Markdown"
                 )
@@ -61,10 +87,9 @@ async def start_handler(message: types.Message):
     welcome_caption = (
         f"👋 Привет, {message.from_user.first_name}!\n\n"
         f"Познакомься, это твоя подопечная — **кошечка манчкин по имени Луна**! 🐾\n\n"
-        f"Нажми кнопку ниже, чтобы открыть мини-игру, погладить Луну, покормить её или поиграть удочкой."
+        f"Нажми кнопку ниже, чтобы открыть мини-игру, погладить её, покормить, поиграть или уложить спать с живой анимацией."
     )
 
-    # 1. Отправляем фото с кнопкой запуска игры
     if os.path.exists(photo_path):
         photo = FSInputFile(photo_path)
         await message.answer_photo(
@@ -80,7 +105,6 @@ async def start_handler(message: types.Message):
             parse_mode="Markdown"
         )
 
-    # 2. Отдельным сообщением присылаем памятку по уходу
     await message.answer(GUIDE_TEXT, parse_mode="Markdown")
 
 @dp.callback_query(F.data == "show_guide")
@@ -88,17 +112,17 @@ async def show_guide_cb(callback: types.CallbackQuery):
     await callback.answer()
     await callback.message.answer(GUIDE_TEXT, parse_mode="Markdown")
 
-# --- Жизненный цикл FastAPI и запуск бота в фоне ---
-
+# --- FastAPI сервер ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    scheduler.add_job(check_and_send_reminders, "interval", minutes=15)
+    # Проверка завершения минутного действия каждые 5 секунд
+    scheduler.add_job(check_finished_actions_job, "interval", seconds=5)
+    # Проверка голода каждые 15 минут
+    scheduler.add_job(check_hungry_pets_job, "interval", minutes=15)
     scheduler.start()
-    
-    # Запускаем поллинг бота параллельно с веб-сервером
+
     bot_task = asyncio.create_task(dp.start_polling(bot))
-    print("Бот и сервер успешно запущены!")
     yield
     bot_task.cancel()
     scheduler.shutdown()
@@ -118,6 +142,23 @@ async def index():
 @app.get("/api/pet")
 async def api_get_pet(user_id: int):
     return await get_pet(user_id)
+
+@app.post("/api/pet/start")
+async def api_start_action(user_id: int, action: str):
+    # Запускаем таймер ровно на 60 секунд
+    return await start_action(user_id, action, duration_sec=60)
+
+@app.post("/api/pet/finish")
+async def api_finish_action(user_id: int):
+    pet = await get_pet(user_id)
+    action = pet.get("current_action", "")
+    if action == "feed":
+        return await complete_action(user_id, hunger_delta=30, energy_delta=5, happiness_delta=10)
+    elif action == "play":
+        return await complete_action(user_id, hunger_delta=-10, energy_delta=-15, happiness_delta=30)
+    elif action == "sleep":
+        return await complete_action(user_id, hunger_delta=-5, energy_delta=40, happiness_delta=10)
+    return pet
 
 @app.post("/api/pet/action")
 async def api_action(user_id: int, payload: ActionPayload):
