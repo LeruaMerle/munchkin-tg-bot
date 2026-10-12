@@ -18,8 +18,8 @@ from database import (
 )
 from guide import GUIDE_TEXT
 
-BOT_TOKEN = ("8966880292:AAEkLtUvC0xRyRBqMH40OMfkzAO5ioo2sys")
-APP_URL = ("https://munchkin-tg-bot.onrender.com")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+APP_URL = os.getenv("APP_URL", "https://munchkin-tg-bot.onrender.com")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
