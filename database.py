@@ -19,9 +19,12 @@ async def init_db():
                 current_action TEXT DEFAULT ''
             )
         """)
-        # Миграция колонок на случай, если таблица уже создана ранее
+        # Безопасное добавление колонок, если таблица была создана ранее
         try:
             await db.execute("ALTER TABLE pets ADD COLUMN busy_until INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
             await db.execute("ALTER TABLE pets ADD COLUMN current_action TEXT DEFAULT ''")
         except Exception:
             pass
@@ -66,6 +69,22 @@ async def get_pet(user_id: int):
                 "busy_until": busy_until, "current_action": current_action
             }
 
+async def update_pet(user_id: int, hunger_delta: int = 0, energy_delta: int = 0, happiness_delta: int = 0):
+    pet = await get_pet(user_id)
+    new_hunger = min(100, max(0, pet["hunger"] + hunger_delta))
+    new_energy = min(100, max(0, pet["energy"] + energy_delta))
+    new_happiness = min(100, max(0, pet["happiness"] + happiness_delta))
+    now = int(time.time())
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute(
+            "UPDATE pets SET hunger = ?, energy = ?, happiness = ?, last_update = ? WHERE user_id = ?",
+            (new_hunger, new_energy, new_happiness, now, user_id)
+        )
+        await db.commit()
+
+    return {"name": pet["name"], "hunger": new_hunger, "energy": new_energy, "happiness": new_happiness}
+
 async def start_action(user_id: int, action: str, duration_sec: int = 60):
     now = int(time.time())
     busy_until = now + duration_sec
@@ -93,7 +112,6 @@ async def complete_action(user_id: int, hunger_delta: int, energy_delta: int, ha
     return {"name": pet["name"], "hunger": new_hunger, "energy": new_energy, "happiness": new_happiness}
 
 async def get_finished_actions():
-    """Найти действия, у которых вышел таймер"""
     now = int(time.time())
     async with aiosqlite.connect(DB_NAME) as db:
         async with db.execute(
