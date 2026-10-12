@@ -18,7 +18,7 @@ from database import (
 )
 from guide import GUIDE_TEXT
 
-BOT_TOKEN = ("8966880292:AAGb4iNtfePMMBq0IDi43zErcoQDRvCegQE")
+BOT_TOKEN = ("8966880292:AAEkLtUvC0xRyRBqMH40OMfkzAO5ioo2sys")
 APP_URL = ("https://munchkin-tg-bot.onrender.com")
 
 bot = Bot(token=BOT_TOKEN)
